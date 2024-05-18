@@ -325,7 +325,7 @@ def run_pipnet(args=None):
     frozen = True
     lrs_net = []
     lrs_classifier = []
-
+    breakpoint()
     for epoch in range(1, args.epochs + 1):
         epochs_to_finetune = 3  # during finetuning, only train classification layer and freeze rest. usually done for a few epochs (at least 1, more depends on size of dataset)
         if epoch <= epochs_to_finetune and (
@@ -367,7 +367,7 @@ def run_pipnet(args=None):
                         param.requires_grad = False
 
         print("\n Epoch", epoch, "frozen:", frozen, flush=True)
-        if (epoch == args.epochs or epoch % 30 == 0) and args.epochs > 1:
+        if (epoch == args.epochs or epoch % 5 == 0) and args.epochs > 1:
             # SET SMALL WEIGHTS TO ZERO
             with torch.no_grad():
                 torch.set_printoptions(profile="full")
@@ -434,7 +434,7 @@ def run_pipnet(args=None):
                 os.path.join(os.path.join(args.log_dir, "checkpoints"), "net_trained"),
             )
 
-            if epoch % 30 == 0:
+            if epoch % 5 == 0:
                 net.eval()
                 torch.save(
                     {

@@ -1,8 +1,10 @@
 import argparse
+import os
 import random
 from typing import Dict, Tuple
 
 import numpy as np
+import pyrootutils
 import torch
 import torch.optim
 import torch.utils.data
@@ -10,6 +12,9 @@ import torchvision
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
 from torch import Tensor
+
+pyrootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
+from util.FunnybirdsDataset import FunnyBirdsDataset
 
 
 def get_data(args: argparse.Namespace):
@@ -32,11 +37,11 @@ def get_data(args: argparse.Namespace):
             "./data/CUB_200_2011/dataset/test_full",
         )
     if args.dataset == "FunnyBirds":
-        return get_pets(
+        return get_FunnyBirds(
             True,
-            "./data/FunnyBirds/train",
-            "./data/FunnyBirds/train",
-            "./data/FunnyBirds/test",
+            "./data/FunnyBirds/",
+            "./data/FunnyBirds/",
+            "./data/FunnyBirds/",
             args.image_size,
             args.seed,
             args.validation_size,
@@ -98,9 +103,6 @@ def get_dataloaders(args: argparse.Namespace, device):
         testset,
         testset_projection,
         classes,
-        num_channels,
-        train_indices,
-        targets,
     ) = get_data(args)
 
     # Determine if GPU should be used
@@ -112,23 +114,16 @@ def get_dataloaders(args: argparse.Namespace, device):
 
     if args.weighted_loss:
         if targets is None:
-            raise ValueError(
-                "Weighted loss not implemented for this dataset. Targets should be restructured"
-            )
+            raise ValueError("Weighted loss not implemented for this dataset. Targets should be restructured")
         # https://discuss.pytorch.org/t/dataloader-using-subsetrandomsampler-and-weightedrandomsampler-at-the-same-time/29907
         class_sample_count = torch.tensor(
-            [
-                (targets[train_indices] == t).sum()
-                for t in torch.unique(targets, sorted=True)
-            ]
+            [(targets[train_indices] == t).sum() for t in torch.unique(targets, sorted=True)]
         )
         weight = 1.0 / class_sample_count.float()
         print("Weights for weighted sampler: ", weight, flush=True)
         samples_weight = torch.tensor([weight[t] for t in targets[train_indices]])
         # Create sampler, dataset, loader
-        sampler = torch.utils.data.WeightedRandomSampler(
-            samples_weight, len(samples_weight), replacement=True
-        )
+        sampler = torch.utils.data.WeightedRandomSampler(samples_weight, len(samples_weight), replacement=True)
         to_shuffle = False
 
     pretrain_batchsize = args.batch_size_pretrain
@@ -200,7 +195,7 @@ def get_dataloaders(args: argparse.Namespace, device):
     testloader = torch.utils.data.DataLoader(
         testset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,
         pin_memory=cuda,
         num_workers=num_workers,
         worker_init_fn=np.random.seed(args.seed),
@@ -242,90 +237,31 @@ def create_datasets(
     test_dir_projection=None,
     transform1p=None,
 ):
-    trainvalset = torchvision.datasets.ImageFolder(train_dir)
-    classes = trainvalset.classes
-    targets = trainvalset.targets
+    trainvalset = FunnyBirdsDataset(train_dir, split="train")
+    classes = [trainvalset.classes[i]["class_idx"] for i in range(len(trainvalset.classes))]
+    targets = np.arange(50)
     indices = list(range(len(trainvalset)))
 
     train_indices = indices
 
-    if test_dir is None:
-        if validation_size <= 0.0:
-            raise ValueError(
-                "There is no test set directory, so validation size should be > 0 such that training set can be split."
-            )
-        subset_targets = list(np.array(targets)[train_indices])
-        train_indices, test_indices = train_test_split(
-            train_indices,
-            test_size=validation_size,
-            stratify=subset_targets,
-            random_state=seed,
-        )
-        testset = torch.utils.data.Subset(
-            torchvision.datasets.ImageFolder(train_dir, transform=transform_no_augment),
-            indices=test_indices,
-        )
-        print(
-            "Samples in trainset:",
-            len(indices),
-            "of which",
-            len(train_indices),
-            "for training and ",
-            len(test_indices),
-            "for testing.",
-            flush=True,
-        )
-    else:
-        testset = torchvision.datasets.ImageFolder(
-            test_dir, transform=transform_no_augment
-        )
+    testset = FunnyBirdsDataset(test_dir, transform=transform_no_augment, split="test")
 
-    trainset = torch.utils.data.Subset(
-        TwoAugSupervisedDataset(
-            trainvalset, transform1=transform1, transform2=transform2
-        ),
-        indices=train_indices,
+    trainset = TwoAugSupervisedDataset(trainvalset, transform1=transform1, transform2=transform2)
+
+    trainset_normal = FunnyBirdsDataset(train_dir, transform=transform_no_augment, split="train")
+
+    trainset_normal_augment = FunnyBirdsDataset(
+        train_dir, transform=transforms.Compose([transform1, transform2]), split="train"
     )
-    trainset_normal = torch.utils.data.Subset(
-        torchvision.datasets.ImageFolder(train_dir, transform=transform_no_augment),
-        indices=train_indices,
-    )
-    trainset_normal_augment = torch.utils.data.Subset(
-        torchvision.datasets.ImageFolder(
-            train_dir, transform=transforms.Compose([transform1, transform2])
-        ),
-        indices=train_indices,
-    )
-    projectset = torchvision.datasets.ImageFolder(
-        project_dir, transform=transform_no_augment
-    )
+    projectset = FunnyBirdsDataset(project_dir, transform=transform_no_augment, split="train")
 
     if test_dir_projection is not None:
-        testset_projection = torchvision.datasets.ImageFolder(
-            test_dir_projection, transform=transform_no_augment
-        )
+        testset_projection = FunnyBirdsDataset(test_dir_projection, transform=transform_no_augment, split="test")
     else:
         testset_projection = testset
     if train_dir_pretrain is not None:
-        trainvalset_pr = torchvision.datasets.ImageFolder(train_dir_pretrain)
-        targets_pr = trainvalset_pr.targets
-        indices_pr = list(range(len(trainvalset_pr)))
-        train_indices_pr = indices_pr
-        if test_dir is None:
-            subset_targets_pr = list(np.array(targets_pr)[indices_pr])
-            train_indices_pr, test_indices_pr = train_test_split(
-                indices_pr,
-                test_size=validation_size,
-                stratify=subset_targets_pr,
-                random_state=seed,
-            )
-
-        trainset_pretraining = torch.utils.data.Subset(
-            TwoAugSupervisedDataset(
-                trainvalset_pr, transform1=transform1p, transform2=transform2
-            ),
-            indices=train_indices_pr,
-        )
+        trainvalset_pr = FunnyBirdsDataset(train_dir_pretrain, split="train")
+        trainset_pretraining = TwoAugSupervisedDataset(trainvalset_pr, transform1=transform1p, transform2=transform2)
     else:
         trainset_pretraining = None
 
@@ -338,13 +274,10 @@ def create_datasets(
         testset,
         testset_projection,
         classes,
-        num_channels,
-        train_indices,
-        torch.LongTensor(targets),
     )
 
 
-def get_pets(
+def get_FunnyBirds(
     augment: bool,
     train_dir: str,
     project_dir: str,
@@ -353,12 +286,7 @@ def get_pets(
     seed: int,
     validation_size: float,
 ):
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
-    normalize = transforms.Normalize(mean=mean, std=std)
-    transform_no_augment = transforms.Compose(
-        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
-    )
+    transform_no_augment = transforms.Compose([transforms.Resize(size=(img_size, img_size)), transforms.ToTensor()])
 
     if augment:
         transform1 = transforms.Compose(
@@ -375,235 +303,6 @@ def get_pets(
                 TrivialAugmentWideNoShape(),
                 transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
                 transforms.ToTensor(),
-                normalize,
-            ]
-        )
-    else:
-        transform1 = transform_no_augment
-        transform2 = transform_no_augment
-
-    return create_datasets(
-        transform1,
-        transform2,
-        transform_no_augment,
-        3,
-        train_dir,
-        project_dir,
-        test_dir,
-        seed,
-        validation_size,
-    )
-
-
-def get_partimagenet(
-    augment: bool,
-    train_dir: str,
-    project_dir: str,
-    test_dir: str,
-    img_size: int,
-    seed: int,
-    validation_size: float,
-):
-    # Validation size was set to 0.2, such that 80% of the data is used for training
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
-    normalize = transforms.Normalize(mean=mean, std=std)
-    transform_no_augment = transforms.Compose(
-        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
-    )
-
-    if augment:
-        transform1 = transforms.Compose(
-            [
-                transforms.Resize(size=(img_size + 48, img_size + 48)),
-                TrivialAugmentWideNoColor(),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomResizedCrop(img_size + 8, scale=(0.95, 1.0)),
-            ]
-        )
-        transform2 = transforms.Compose(
-            [
-                TrivialAugmentWideNoShape(),
-                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
-                transforms.ToTensor(),
-                normalize,
-            ]
-        )
-    else:
-        transform1 = transform_no_augment
-        transform2 = transform_no_augment
-
-    return create_datasets(
-        transform1,
-        transform2,
-        transform_no_augment,
-        3,
-        train_dir,
-        project_dir,
-        test_dir,
-        seed,
-        validation_size,
-    )
-
-
-def get_birds(
-    augment: bool,
-    train_dir: str,
-    project_dir: str,
-    test_dir: str,
-    img_size: int,
-    seed: int,
-    validation_size: float,
-    train_dir_pretrain=None,
-    test_dir_projection=None,
-):
-    shape = (3, img_size, img_size)
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
-    normalize = transforms.Normalize(mean=mean, std=std)
-    transform_no_augment = transforms.Compose(
-        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
-    )
-    transform1p = None
-    if augment:
-        transform1 = transforms.Compose(
-            [
-                transforms.Resize(size=(img_size + 8, img_size + 8)),
-                TrivialAugmentWideNoColor(),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
-            ]
-        )
-        transform1p = transforms.Compose(
-            [
-                transforms.Resize(
-                    size=(img_size + 32, img_size + 32)
-                ),  # for pretraining, crop can be bigger since it doesn't matter when bird is not fully visible
-                TrivialAugmentWideNoColor(),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
-            ]
-        )
-        transform2 = transforms.Compose(
-            [
-                TrivialAugmentWideNoShape(),
-                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
-                transforms.ToTensor(),
-                normalize,
-            ]
-        )
-    else:
-        transform1 = transform_no_augment
-        transform2 = transform_no_augment
-
-    return create_datasets(
-        transform1,
-        transform2,
-        transform_no_augment,
-        3,
-        train_dir,
-        project_dir,
-        test_dir,
-        seed,
-        validation_size,
-        train_dir_pretrain,
-        test_dir_projection,
-        transform1p,
-    )
-
-
-def get_cars(
-    augment: bool,
-    train_dir: str,
-    project_dir: str,
-    test_dir: str,
-    img_size: int,
-    seed: int,
-    validation_size: float,
-):
-    shape = (3, img_size, img_size)
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
-
-    normalize = transforms.Normalize(mean=mean, std=std)
-    transform_no_augment = transforms.Compose(
-        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
-    )
-
-    if augment:
-        transform1 = transforms.Compose(
-            [
-                transforms.Resize(size=(img_size + 32, img_size + 32)),
-                TrivialAugmentWideNoColor(),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
-            ]
-        )
-
-        transform2 = transforms.Compose(
-            [
-                TrivialAugmentWideNoShapeWithColor(),
-                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
-                transforms.ToTensor(),
-                normalize,
-            ]
-        )
-
-    else:
-        transform1 = transform_no_augment
-        transform2 = transform_no_augment
-
-    return create_datasets(
-        transform1,
-        transform2,
-        transform_no_augment,
-        3,
-        train_dir,
-        project_dir,
-        test_dir,
-        seed,
-        validation_size,
-    )
-
-
-def get_grayscale(
-    augment: bool,
-    train_dir: str,
-    project_dir: str,
-    test_dir: str,
-    img_size: int,
-    seed: int,
-    validation_size: float,
-    train_dir_pretrain=None,
-):
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
-    normalize = transforms.Normalize(mean=mean, std=std)
-    transform_no_augment = transforms.Compose(
-        [
-            transforms.Resize(size=(img_size, img_size)),
-            transforms.Grayscale(3),  # convert to grayscale with three channels
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
-
-    if augment:
-        transform1 = transforms.Compose(
-            [
-                transforms.Resize(size=(img_size + 32, img_size + 32)),
-                TrivialAugmentWideNoColor(),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomResizedCrop(224 + 8, scale=(0.95, 1.0)),
-            ]
-        )
-        transform2 = transforms.Compose(
-            [
-                TrivialAugmentWideNoShape(),
-                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
-                transforms.Grayscale(3),  # convert to grayscale with three channels
-                transforms.ToTensor(),
-                normalize,
             ]
         )
     else:
@@ -629,12 +328,7 @@ class TwoAugSupervisedDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, transform1, transform2):
         self.dataset = dataset
         self.classes = dataset.classes
-        if type(dataset) == torchvision.datasets.folder.ImageFolder:
-            self.imgs = dataset.imgs
-            self.targets = dataset.targets
-        else:
-            self.targets = dataset._labels
-            self.imgs = list(zip(dataset._image_files, dataset._labels))
+
         self.transform1 = transform1
         self.transform2 = transform2
 
