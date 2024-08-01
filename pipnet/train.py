@@ -38,10 +38,12 @@ def train_pipnet(net, train_loader, optimizer_net, optimizer_classifier, schedul
                     ncols=0)
 
     count_param=0
-    for name, param in net.named_parameters():
-        if param.requires_grad:
-            count_param+=1
-    print("Number of parameters that require gradient: ", count_param, flush=True)
+    # for name, param in net.named_parameters():
+    #     if param.requires_grad:
+    #         count_param+=1
+    # print("Number of parameters that require gradient: ", count_param, flush=True)
+    num_trainable_params = compute_trainable_params(net)
+    print(f'Number of trainable parameters: {num_trainable_params}')
 
     if pretrain:
         align_pf_weight = (epoch/nr_epochs)*1.

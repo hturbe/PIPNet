@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from features.resnet_features import resnet18_features, resnet34_features, resnet50_features, resnet50_features_inat, resnet101_features, resnet152_features
-from features.convnext_features import convnext_tiny_26_features, convnext_tiny_13_features 
+from features.convnext_features import convnext_tiny_26_features, convnext_tiny_13_features
+from features.dino_features import dino_features
 import torch
 from torch import Tensor
 
@@ -29,7 +30,17 @@ class PIPNet(nn.Module):
         self._multiplier = classification_layer.normalization_multiplier
 
     def forward(self, xs,  inference=False):
-        features = self._net(xs) 
+        if "DINO" in str(self._net).upper():
+            feat = self._net.forward_features(xs)["x_norm_patchtokens"]
+            # attention = self.model.blocks[-1].attn.attn_map
+            # attention = attention[:, :, 1 + 4 :, 1 + 4 :]  # drop 1 cls token + 4 registers
+
+            feat_h = xs.shape[2] // self._net.patch_size
+            feat_w = xs.shape[3] // self._net.patch_size
+
+            features = feat.reshape(feat.shape[0], feat_h, feat_w, -1).permute(0, 3, 1, 2)
+        else:
+            features = self._net(xs)
         proto_features = self._add_on(features)
         pooled = self._pool(proto_features)
         if inference:
@@ -37,7 +48,7 @@ class PIPNet(nn.Module):
             out = self._classification(clamped_pooled) #shape (bs*2, num_classes)
             return proto_features, clamped_pooled, out
         else:
-            out = self._classification(pooled) #shape (bs*2, num_classes) 
+            out = self._classification(pooled) #shape (bs*2, num_classes)
             return proto_features, pooled, out
 
 
@@ -48,7 +59,8 @@ base_architecture_to_features = {'resnet18': resnet18_features,
                                  'resnet101': resnet101_features,
                                  'resnet152': resnet152_features,
                                  'convnext_tiny_26': convnext_tiny_26_features,
-                                 'convnext_tiny_13': convnext_tiny_13_features}
+                                 'convnext_tiny_13': convnext_tiny_13_features,
+                                 "dino": dino_features}
 
 # adapted from https://pytorch.org/docs/stable/_modules/torch/nn/modules/linear.html#Linear
 class NonNegLinear(nn.Module):
@@ -71,7 +83,7 @@ class NonNegLinear(nn.Module):
         return F.linear(input,torch.relu(self.weight), self.bias)
 
 
-def get_network(num_classes: int, args: argparse.Namespace): 
+def get_network(num_classes: int, args: argparse.Namespace):
     features = base_architecture_to_features[args.net](pretrained=not args.disable_pretrained)
     features_name = str(features).upper()
     if 'next' in args.net:
@@ -79,34 +91,32 @@ def get_network(num_classes: int, args: argparse.Namespace):
     if features_name.startswith('RES') or features_name.startswith('CONVNEXT'):
         first_add_on_layer_in_channels = \
             [i for i in features.modules() if isinstance(i, nn.Conv2d)][-1].out_channels
+    elif features_name.startswith('DINO'):
+        first_add_on_layer_in_channels = features.embed_dim
     else:
         raise Exception('other base architecture NOT implemented')
-    
-    
+
     if args.num_features == 0:
         num_prototypes = first_add_on_layer_in_channels
         print("Number of prototypes: ", num_prototypes, flush=True)
         add_on_layers = nn.Sequential(
-            nn.Softmax(dim=1), #softmax over every prototype for each patch, such that for every location in image, sum over prototypes is 1                
+            nn.Softmax(dim=1), #softmax over every prototype for each patch, such that for every location in image, sum over prototypes is 1
     )
     else:
         num_prototypes = args.num_features
         print("Number of prototypes set from", first_add_on_layer_in_channels, "to", num_prototypes,". Extra 1x1 conv layer added. Not recommended.", flush=True)
         add_on_layers = nn.Sequential(
-            nn.Conv2d(in_channels=first_add_on_layer_in_channels, out_channels=num_prototypes, kernel_size=1, stride = 1, padding=0, bias=True), 
-            nn.Softmax(dim=1), #softmax over every prototype for each patch, such that for every location in image, sum over prototypes is 1                
+            nn.Conv2d(in_channels=first_add_on_layer_in_channels, out_channels=num_prototypes, kernel_size=1, stride = 1, padding=0, bias=True),
+            nn.Softmax(dim=1), #softmax over every prototype for each patch, such that for every location in image, sum over prototypes is 1
     )
     pool_layer = nn.Sequential(
                 nn.AdaptiveMaxPool2d(output_size=(1,1)), #outputs (bs, ps,1,1)
                 nn.Flatten() #outputs (bs, ps)
-                ) 
-    
+                )
+
     if args.bias:
         classification_layer = NonNegLinear(num_prototypes, num_classes, bias=True)
     else:
         classification_layer = NonNegLinear(num_prototypes, num_classes, bias=False)
-        
+
     return features, add_on_layers, pool_layer, classification_layer, num_prototypes
-
-
-    

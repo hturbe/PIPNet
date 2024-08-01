@@ -325,7 +325,6 @@ def run_pipnet(args=None):
     frozen = True
     lrs_net = []
     lrs_classifier = []
-    breakpoint()
     for epoch in range(1, args.epochs + 1):
         epochs_to_finetune = 3  # during finetuning, only train classification layer and freeze rest. usually done for a few epochs (at least 1, more depends on size of dataset)
         if epoch <= epochs_to_finetune and (
@@ -355,6 +354,9 @@ def run_pipnet(args=None):
                     for param in params_backbone:
                         param.requires_grad = True
                     frozen = False
+                    print("Number of trainable parameters:", sum(p.numel() for p in net.module.parameters() if p.requires_grad))
+                    print("Number of  parameters:", sum(p.numel() for p in net.module.parameters() ))
+
                 # freeze first layers of backbone, train rest
                 else:
                     for param in params_to_freeze:

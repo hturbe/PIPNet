@@ -106,6 +106,7 @@ class FunnyBirdsDataset(Dataset):
                 "class_idx": class_idx,
                 "part_map": part_map,
                 "image_idx": idx,
+                "image_path": img_path
             }
             return sample
 
