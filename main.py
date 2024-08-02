@@ -81,11 +81,11 @@ def run_pipnet(args=None):
         test_projectloader,
         classes,
     ) = get_dataloaders(args, device)
-    if len(classes) <= 20:
-        if args.validation_size == 0.0:
-            print("Classes: ", testloader.dataset.class_to_idx, flush=True)
-        else:
-            print("Classes: ", str(classes), flush=True)
+    # if len(classes) <= 20:
+    #     if args.validation_size == 0.0:
+    #         print("Classes: ", testloader.dataset.class_to_idx, flush=True)
+    #     else:
+    #         print("Classes: ", str(classes), flush=True)
 
     # Create a convolutional network based on arguments and add 1x1 conv layer
     feature_net, add_on_layers, pool_layer, classification_layer, num_prototypes = (

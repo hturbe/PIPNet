@@ -1,7 +1,8 @@
 import argparse
 import os
 import random
-from typing import Dict, Tuple
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import pyrootutils
@@ -15,6 +16,38 @@ from torch import Tensor
 
 pyrootutils.setup_root(os.getcwd(), indicator=".project-root", pythonpath=True)
 from util.FunnybirdsDataset import FunnyBirdsDataset
+from util.IsicDataset import IsicDataset
+from util.LungColonDataset import LungColonDataset
+from util.RSNAPneumoniaDataset import RSNAPneumoniaDataset
+
+
+@dataclass
+class DataConfig:
+    dataset_class: Callable
+    num_classes: int
+    use_keyword_split: Optional[bool] = False
+
+
+dict_datasets: dict[str, DataConfig] = {
+    "FunnyBirds": DataConfig(
+        FunnyBirdsDataset,
+        num_classes=50,
+        use_keyword_split=True,
+    ),
+    "ISIC": DataConfig(
+        IsicDataset,
+        num_classes=9,
+    ),
+    "LUNG": DataConfig(
+        LungColonDataset,
+        num_classes=3,
+        use_keyword_split=True,
+    ),
+    "RSNA": DataConfig(
+        RSNAPneumoniaDataset,
+        num_classes=2,
+    ),
+}
 
 
 def get_data(args: argparse.Namespace):
@@ -24,20 +57,9 @@ def get_data(args: argparse.Namespace):
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     np.random.seed(args.seed)
-    if args.dataset == "CUB-200-2011":
-        return get_birds(
-            True,
-            "./data/CUB_200_2011/dataset/train_crop",
-            "./data/CUB_200_2011/dataset/train",
-            "./data/CUB_200_2011/dataset/test_crop",
-            args.image_size,
-            args.seed,
-            args.validation_size,
-            "./data/CUB_200_2011/dataset/train",
-            "./data/CUB_200_2011/dataset/test_full",
-        )
     if args.dataset == "FunnyBirds":
-        return get_FunnyBirds(
+        return get_Dataset(
+            args.dataset,
             True,
             "./data/FunnyBirds/",
             "./data/FunnyBirds/",
@@ -46,42 +68,35 @@ def get_data(args: argparse.Namespace):
             args.seed,
             args.validation_size,
         )
-    if args.dataset == "pets":
-        return get_pets(
+    if args.dataset == "ISIC":
+        return get_Dataset(
+            args.dataset,
             True,
-            "./data/PETS/dataset/train",
-            "./data/PETS/dataset/train",
-            "./data/PETS/dataset/test",
+            "./data/isic_2019/",
+            "./data/isic_2019/",
+            "./data/isic_2019/",
             args.image_size,
             args.seed,
             args.validation_size,
         )
-    if args.dataset == "partimagenet":  # use --validation_size of 0.2
-        return get_partimagenet(
+    if args.dataset == "LUNG":
+        return get_Dataset(
+            args.dataset,
             True,
-            "./data/partimagenet/dataset/all",
-            "./data/partimagenet/dataset/all",
-            None,
+            "./data/LC25000/lung_colon_image_set/lung_image_sets/",
+            "./data/LC25000/lung_colon_image_set/lung_image_sets/",
+            "./data/LC25000/lung_colon_image_set/lung_image_sets/",
             args.image_size,
             args.seed,
             args.validation_size,
         )
-    if args.dataset == "CARS":
-        return get_cars(
+    if args.dataset == "RSNA":
+        return get_Dataset(
+            args.dataset,
             True,
-            "./data/cars/dataset/train",
-            "./data/cars/dataset/train",
-            "./data/cars/dataset/test",
-            args.image_size,
-            args.seed,
-            args.validation_size,
-        )
-    if args.dataset == "grayscale_example":
-        return get_grayscale(
-            True,
-            "./data/train",
-            "./data/train",
-            "./data/test",
+            "./data/rsna-pneumonia-detection-challenge/",
+            "./data/rsna-pneumonia-detection-challenge/",
+            "./data/rsna-pneumonia-detection-challenge/",
             args.image_size,
             args.seed,
             args.validation_size,
@@ -223,7 +238,8 @@ def get_dataloaders(args: argparse.Namespace, device):
     )
 
 
-def create_datasets(
+def create_datasets_split(
+    dataset_name: str,
     transform1,
     transform2,
     transform_no_augment,
@@ -237,30 +253,34 @@ def create_datasets(
     test_dir_projection=None,
     transform1p=None,
 ):
-    trainvalset = FunnyBirdsDataset(train_dir, split="train")
-    classes = [trainvalset.classes[i]["class_idx"] for i in range(len(trainvalset.classes))]
+    Dataset = dict_datasets[dataset_name].dataset_class
+    trainvalset = Dataset(train_dir, split="train")
+    # classes = [trainvalset.classes[i]["class_idx"] for i in range(len(trainvalset.classes))]
+    classes =  np.arange(dict_datasets[dataset_name].num_classes).tolist()
     targets = np.arange(50)
     indices = list(range(len(trainvalset)))
 
     train_indices = indices
 
-    testset = FunnyBirdsDataset(test_dir, transform=transform_no_augment, split="test")
+    testset = Dataset(test_dir, transform=transform_no_augment, split="test")
 
     trainset = TwoAugSupervisedDataset(trainvalset, transform1=transform1, transform2=transform2)
 
-    trainset_normal = FunnyBirdsDataset(train_dir, transform=transform_no_augment, split="train")
+    trainset_normal = Dataset(train_dir, transform=transform_no_augment, split="train")
 
-    trainset_normal_augment = FunnyBirdsDataset(
-        train_dir, transform=transforms.Compose([transform1, transform2]), split="train"
+    trainset_normal_augment = Dataset(
+        train_dir,
+        transform=transforms.Compose([transform1, transform2]),
+        split="train",
     )
-    projectset = FunnyBirdsDataset(project_dir, transform=transform_no_augment, split="train")
+    projectset = Dataset(project_dir, transform=transform_no_augment, split="train")
 
     if test_dir_projection is not None:
-        testset_projection = FunnyBirdsDataset(test_dir_projection, transform=transform_no_augment, split="test")
+        testset_projection = Dataset(test_dir_projection, transform=transform_no_augment, split="test")
     else:
         testset_projection = testset
     if train_dir_pretrain is not None:
-        trainvalset_pr = FunnyBirdsDataset(train_dir_pretrain, split="train")
+        trainvalset_pr = Dataset(train_dir_pretrain, split="train")
         trainset_pretraining = TwoAugSupervisedDataset(trainvalset_pr, transform1=transform1p, transform2=transform2)
     else:
         trainset_pretraining = None
@@ -277,7 +297,66 @@ def create_datasets(
     )
 
 
-def get_FunnyBirds(
+def create_datasets_train(
+    dataset_name: str,
+    transform1,
+    transform2,
+    transform_no_augment,
+    num_channels: int,
+    train_dir: str,
+    project_dir: str,
+    test_dir: str,
+    seed: int,
+    validation_size: float,
+    train_dir_pretrain=None,
+    test_dir_projection=None,
+    transform1p=None,
+):
+    Dataset = dict_datasets[dataset_name].dataset_class
+    trainvalset = Dataset(train_dir, train=True)
+    classes =  np.arange(dict_datasets[dataset_name].num_classes).tolist()
+    targets = np.arange(50)
+    indices = list(range(len(trainvalset)))
+
+    train_indices = indices
+
+    testset = Dataset(test_dir, transform=transform_no_augment, train=False)
+
+    trainset = TwoAugSupervisedDataset(trainvalset, transform1=transform1, transform2=transform2)
+
+    trainset_normal = Dataset(train_dir, transform=transform_no_augment, train=True)
+
+    trainset_normal_augment = Dataset(
+        train_dir,
+        transform=transforms.Compose([transform1, transform2]),
+        train=True,
+    )
+    projectset = Dataset(project_dir, transform=transform_no_augment, train=True)
+
+    if test_dir_projection is not None:
+        testset_projection = Dataset(test_dir_projection, transform=transform_no_augment, train=False)
+    else:
+        testset_projection = testset
+    if train_dir_pretrain is not None:
+        trainvalset_pr = Dataset(train_dir_pretrain, train=True)
+        trainset_pretraining = TwoAugSupervisedDataset(trainvalset_pr, transform1=transform1p, transform2=transform2)
+    else:
+        trainset_pretraining = None
+
+    return (
+        trainset,
+        trainset_pretraining,
+        trainset_normal,
+        trainset_normal_augment,
+        projectset,
+        testset,
+        testset_projection,
+        classes,
+    )
+
+
+def get_Dataset(
+    dataset_name: str,
     augment: bool,
     train_dir: str,
     project_dir: str,
@@ -308,18 +387,32 @@ def get_FunnyBirds(
     else:
         transform1 = transform_no_augment
         transform2 = transform_no_augment
-
-    return create_datasets(
-        transform1,
-        transform2,
-        transform_no_augment,
-        3,
-        train_dir,
-        project_dir,
-        test_dir,
-        seed,
-        validation_size,
-    )
+    if dataset_name in ["FunnyBirds", "LUNG"]:
+        return create_datasets_split(
+            dataset_name,
+            transform1,
+            transform2,
+            transform_no_augment,
+            3,
+            train_dir,
+            project_dir,
+            test_dir,
+            seed,
+            validation_size,
+        )
+    else:
+        return create_datasets_train(
+            dataset_name,
+            transform1,
+            transform2,
+            transform_no_augment,
+            3,
+            train_dir,
+            project_dir,
+            test_dir,
+            seed,
+            validation_size,
+        )
 
 
 class TwoAugSupervisedDataset(torch.utils.data.Dataset):
@@ -327,7 +420,7 @@ class TwoAugSupervisedDataset(torch.utils.data.Dataset):
 
     def __init__(self, dataset, transform1, transform2):
         self.dataset = dataset
-        self.classes = dataset.classes
+        # self.classes = dataset.classes
 
         self.transform1 = transform1
         self.transform2 = transform2
