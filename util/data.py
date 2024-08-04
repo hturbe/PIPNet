@@ -101,6 +101,19 @@ def get_data(args: argparse.Namespace):
             args.seed,
             args.validation_size,
         )
+    if args.dataset == "CUB":
+        return get_birds(
+            True,
+            "./data/CUB_200_2011/dataset/train_crop",
+            "./data/CUB_200_2011/dataset/train",
+            "./data/CUB_200_2011/dataset/test_crop",
+            args.image_size,
+            args.seed,
+            args.validation_size,
+            "./data/CUB_200_2011/dataset/train",
+            "./data/CUB_200_2011/dataset/test_full",
+        )
+
     raise Exception(f'Could not load data set, data set "{args.dataset}" not found!')
 
 
@@ -256,7 +269,7 @@ def create_datasets_split(
     Dataset = dict_datasets[dataset_name].dataset_class
     trainvalset = Dataset(train_dir, split="train")
     # classes = [trainvalset.classes[i]["class_idx"] for i in range(len(trainvalset.classes))]
-    classes =  np.arange(dict_datasets[dataset_name].num_classes).tolist()
+    classes = np.arange(dict_datasets[dataset_name].num_classes).tolist()
     targets = np.arange(50)
     indices = list(range(len(trainvalset)))
 
@@ -314,7 +327,7 @@ def create_datasets_train(
 ):
     Dataset = dict_datasets[dataset_name].dataset_class
     trainvalset = Dataset(train_dir, train=True)
-    classes =  np.arange(dict_datasets[dataset_name].num_classes).tolist()
+    classes = np.arange(dict_datasets[dataset_name].num_classes).tolist()
     targets = np.arange(50)
     indices = list(range(len(trainvalset)))
 
@@ -480,3 +493,162 @@ class TrivialAugmentWideNoShape(transforms.TrivialAugmentWide):
             "AutoContrast": (torch.tensor(0.0), False),
             "Equalize": (torch.tensor(0.0), False),
         }
+
+
+def create_datasets(
+    transform1,
+    transform2,
+    transform_no_augment,
+    num_channels: int,
+    train_dir: str,
+    project_dir: str,
+    test_dir: Optional[str],
+    seed: int,
+    validation_size: float,
+    train_dir_pretrain=None,
+    test_dir_projection=None,
+    transform1p=None,
+):
+    trainvalset = torchvision.datasets.ImageFolder(train_dir)
+    classes = trainvalset.classes
+    targets = trainvalset.targets
+    indices = list(range(len(trainvalset)))
+
+    train_indices = indices
+
+    if test_dir is None:
+        if validation_size <= 0.0:
+            raise ValueError(
+                "There is no test set directory, so validation size should be > 0 such that training set can be split."
+            )
+        subset_targets = list(np.array(targets)[train_indices])
+        train_indices, test_indices = train_test_split(
+            train_indices, test_size=validation_size, stratify=subset_targets, random_state=seed
+        )
+        testset = torch.utils.data.Subset(
+            torchvision.datasets.ImageFolder(train_dir, transform=transform_no_augment), indices=test_indices
+        )
+        print(
+            "Samples in trainset:",
+            len(indices),
+            "of which",
+            len(train_indices),
+            "for training and ",
+            len(test_indices),
+            "for testing.",
+            flush=True,
+        )
+    else:
+        testset = torchvision.datasets.ImageFolder(test_dir, transform=transform_no_augment)
+
+    trainset = torch.utils.data.Subset(
+        TwoAugSupervisedDataset(trainvalset, transform1=transform1, transform2=transform2), indices=train_indices
+    )
+    trainset_normal = torch.utils.data.Subset(
+        torchvision.datasets.ImageFolder(train_dir, transform=transform_no_augment), indices=train_indices
+    )
+    trainset_normal_augment = torch.utils.data.Subset(
+        torchvision.datasets.ImageFolder(train_dir, transform=transforms.Compose([transform1, transform2])),
+        indices=train_indices,
+    )
+    projectset = torchvision.datasets.ImageFolder(project_dir, transform=transform_no_augment)
+
+    if test_dir_projection is not None:
+        testset_projection = torchvision.datasets.ImageFolder(test_dir_projection, transform=transform_no_augment)
+    else:
+        testset_projection = testset
+    if train_dir_pretrain is not None:
+        trainvalset_pr = torchvision.datasets.ImageFolder(train_dir_pretrain)
+        targets_pr = trainvalset_pr.targets
+        indices_pr = list(range(len(trainvalset_pr)))
+        train_indices_pr = indices_pr
+        if test_dir is None:
+            subset_targets_pr = list(np.array(targets_pr)[indices_pr])
+            train_indices_pr, test_indices_pr = train_test_split(
+                indices_pr, test_size=validation_size, stratify=subset_targets_pr, random_state=seed
+            )
+
+        trainset_pretraining = torch.utils.data.Subset(
+            TwoAugSupervisedDataset(trainvalset_pr, transform1=transform1p, transform2=transform2),
+            indices=train_indices_pr,
+        )
+    else:
+        trainset_pretraining = None
+
+    return (
+        trainset,
+        trainset_pretraining,
+        trainset_normal,
+        trainset_normal_augment,
+        projectset,
+        testset,
+        testset_projection,
+        classes,
+
+    )
+
+def get_birds(
+    augment: bool,
+    train_dir: str,
+    project_dir: str,
+    test_dir: str,
+    img_size: int,
+    seed: int,
+    validation_size: float,
+    train_dir_pretrain=None,
+    test_dir_projection=None,
+):
+    shape = (3, img_size, img_size)
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    normalize = transforms.Normalize(mean=mean, std=std)
+    transform_no_augment = transforms.Compose(
+        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
+    )
+    transform1p = None
+    if augment:
+        transform1 = transforms.Compose(
+            [
+                transforms.Resize(size=(img_size + 8, img_size + 8)),
+                TrivialAugmentWideNoColor(),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
+            ]
+        )
+        transform1p = transforms.Compose(
+            [
+                transforms.Resize(
+                    size=(img_size + 32, img_size + 32)
+                ),  # for pretraining, crop can be bigger since it doesn't matter when bird is not fully visible
+                TrivialAugmentWideNoColor(),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
+            ]
+        )
+        transform2 = transforms.Compose(
+            [
+                TrivialAugmentWideNoShape(),
+                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+    else:
+        transform1 = transform_no_augment
+        transform2 = transform_no_augment
+
+
+    return create_datasets(
+        transform1,
+        transform2,
+        transform_no_augment,
+        3,
+        train_dir,
+        project_dir,
+        test_dir,
+        seed,
+        validation_size,
+        train_dir_pretrain,
+        test_dir_projection,
+        transform1p,
+    )
