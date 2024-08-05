@@ -125,6 +125,17 @@ def get_data(args: argparse.Namespace):
             "./data/CUB_200_2011_augmented/dataset/train",
             "./data/CUB_200_2011_augmented/dataset/test_full",
         )
+    if args.dataset == "CARS":
+        return get_cars(
+            True,
+            "./data/cars/dataset/train",
+            "./data/cars/dataset/train",
+            "./data/cars/dataset/test",
+            args.image_size,
+            args.seed,
+            args.validation_size,
+        )
+
     raise Exception(f'Could not load data set, data set "{args.dataset}" not found!')
 
 
@@ -595,8 +606,8 @@ def create_datasets(
         testset,
         testset_projection,
         classes,
-
     )
+
 
 def get_birds(
     augment: bool,
@@ -648,7 +659,6 @@ def get_birds(
         transform1 = transform_no_augment
         transform2 = transform_no_augment
 
-
     return create_datasets(
         transform1,
         transform2,
@@ -662,4 +672,44 @@ def get_birds(
         train_dir_pretrain,
         test_dir_projection,
         transform1p,
+    )
+
+
+def get_cars(
+    augment: bool, train_dir: str, project_dir: str, test_dir: str, img_size: int, seed: int, validation_size: float
+):
+    shape = (3, img_size, img_size)
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+
+    normalize = transforms.Normalize(mean=mean, std=std)
+    transform_no_augment = transforms.Compose(
+        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
+    )
+
+    if augment:
+        transform1 = transforms.Compose(
+            [
+                transforms.Resize(size=(img_size + 32, img_size + 32)),
+                TrivialAugmentWideNoColor(),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomResizedCrop(img_size + 4, scale=(0.95, 1.0)),
+            ]
+        )
+
+        transform2 = transforms.Compose(
+            [
+                TrivialAugmentWideNoShapeWithColor(),
+                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+
+    else:
+        transform1 = transform_no_augment
+        transform2 = transform_no_augment
+
+    return create_datasets(
+        transform1, transform2, transform_no_augment, 3, train_dir, project_dir, test_dir, seed, validation_size
     )
