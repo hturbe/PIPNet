@@ -135,6 +135,16 @@ def get_data(args: argparse.Namespace):
             args.seed,
             args.validation_size,
         )
+    if args.dataset == "pets":
+        return get_pets(
+            True,
+            "./data/PETS/dataset/train",
+            "./data/PETS/dataset/train",
+            "./data/PETS/dataset/test",
+            args.image_size,
+            args.seed,
+            args.validation_size,
+        )
 
     raise Exception(f'Could not load data set, data set "{args.dataset}" not found!')
 
@@ -706,6 +716,43 @@ def get_cars(
             ]
         )
 
+    else:
+        transform1 = transform_no_augment
+        transform2 = transform_no_augment
+
+    return create_datasets(
+        transform1, transform2, transform_no_augment, 3, train_dir, project_dir, test_dir, seed, validation_size
+    )
+
+
+def get_pets(
+    augment: bool, train_dir: str, project_dir: str, test_dir: str, img_size: int, seed: int, validation_size: float
+):
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    normalize = transforms.Normalize(mean=mean, std=std)
+    transform_no_augment = transforms.Compose(
+        [transforms.Resize(size=(img_size, img_size)), transforms.ToTensor(), normalize]
+    )
+
+    if augment:
+        transform1 = transforms.Compose(
+            [
+                transforms.Resize(size=(img_size + 48, img_size + 48)),
+                TrivialAugmentWideNoColor(),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomResizedCrop(img_size + 8, scale=(0.95, 1.0)),
+            ]
+        )
+
+        transform2 = transforms.Compose(
+            [
+                TrivialAugmentWideNoShape(),
+                transforms.RandomCrop(size=(img_size, img_size)),  # includes crop
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
     else:
         transform1 = transform_no_augment
         transform2 = transform_no_augment
