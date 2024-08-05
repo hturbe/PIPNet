@@ -1,12 +1,21 @@
 import argparse
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from features.resnet_features import resnet18_features, resnet34_features, resnet50_features, resnet50_features_inat, resnet101_features, resnet152_features
-from features.convnext_features import convnext_tiny_26_features, convnext_tiny_13_features
-from features.dino_features import dino_features
-import torch
 from torch import Tensor
+
+from features.convnext_features import convnext_tiny_13_features, convnext_tiny_26_features
+from features.dino_features import dino_features, dino_features_b
+from features.resnet_features import (
+    resnet18_features,
+    resnet34_features,
+    resnet50_features,
+    resnet50_features_inat,
+    resnet101_features,
+    resnet152_features,
+)
+
 
 class PIPNet(nn.Module):
     def __init__(self,
@@ -60,7 +69,8 @@ base_architecture_to_features = {'resnet18': resnet18_features,
                                  'resnet152': resnet152_features,
                                  'convnext_tiny_26': convnext_tiny_26_features,
                                  'convnext_tiny_13': convnext_tiny_13_features,
-                                 "dino": dino_features}
+                                 "dino": dino_features,
+                                 "dino_b": dino_features_b}
 
 # adapted from https://pytorch.org/docs/stable/_modules/torch/nn/modules/linear.html#Linear
 class NonNegLinear(nn.Module):

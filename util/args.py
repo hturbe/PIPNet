@@ -299,6 +299,15 @@ def get_optimizer_nn(net, args: argparse.Namespace) -> torch.optim.Optimizer:
             #     param.requires_grad = False
             else:
                 params_backbone.append(param)
+    elif "dino_b" in args.net:
+        print("chosen network is DINO_b", flush=True)
+        for name, param in net.module._net.named_parameters():
+            if "blocks.11"in name:
+                params_to_train.append(param)
+            else:
+                params_backbone.append(param)
+
+
     elif "dino" in args.net:
         print("chosen network is DINO", flush=True)
         for name, param in net.module._net.named_parameters():
@@ -309,6 +318,7 @@ def get_optimizer_nn(net, args: argparse.Namespace) -> torch.optim.Optimizer:
             #     params_to_freeze.append(param)
             else:
                 params_backbone.append(param)
+
     else:
         print("Network is not ResNet or ConvNext.", flush=True)
     classification_weight = []

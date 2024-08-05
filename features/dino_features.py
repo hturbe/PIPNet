@@ -1,4 +1,5 @@
 import ssl
+
 import torch
 
 dict_model = {
@@ -11,6 +12,17 @@ dict_model = {
 
 def dino_features(pretrained=False, **kwargs):
     arch = "dinov2_vitl14_reg"
+    if arch in dict_model:
+        ssl._create_default_https_context = ssl._create_unverified_context
+        image_encoder = torch.hub.load(*dict_model[arch])
+    else:
+        raise NotImplementedError
+
+    return image_encoder
+
+
+def dino_features_b(pretrained=False, **kwargs):
+    arch = "dinov2_vitb14_reg"
     if arch in dict_model:
         ssl._create_default_https_context = ssl._create_unverified_context
         image_encoder = torch.hub.load(*dict_model[arch])
