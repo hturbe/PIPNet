@@ -113,7 +113,18 @@ def get_data(args: argparse.Namespace):
             "./data/CUB_200_2011/dataset/train",
             "./data/CUB_200_2011/dataset/test_full",
         )
-
+    if args.dataset == "CUB_augmented":
+        return get_birds(
+            True,
+            "./data/CUB_200_2011_augmented/dataset/train_crop",
+            "./data/CUB_200_2011_augmented/dataset/train",
+            "./data/CUB_200_2011_augmented/dataset/test_crop",
+            args.image_size,
+            args.seed,
+            args.validation_size,
+            "./data/CUB_200_2011_augmented/dataset/train",
+            "./data/CUB_200_2011_augmented/dataset/test_full",
+        )
     raise Exception(f'Could not load data set, data set "{args.dataset}" not found!')
 
 
